@@ -83,26 +83,22 @@ Substitua:
 
 ```json
 {
-  "Version": "2012-10-17",
-  "Statement": [
-    {
-      "Effect": "Allow",
-      "Action": [
-        "cloudwatch:DescribeAlarms",
-        "cloudwatch:PutMetricAlarm",
-        "cloudwatch:GetMetricStatistics"
-      ],
-      "Resource": "*"
-    },
-    {
-      "Effect": "Allow",
-      "Action": [
-        "sns:ListTopics",
-        "sns:GetTopicAttributes"
-      ],
-      "Resource": "*"
-    }
-  ]
+    "Version": "2012-10-17",
+    "Statement": [
+        {
+            "Effect": "Allow",
+            "Action": [
+                "cloudwatch:DescribeAlarms",
+                "cloudwatch:PutMetricAlarm",
+                "cloudwatch:GetMetricStatistics",
+                "sns:ListTopics",
+                "sns:GetTopicAttributes",
+                "ssm:GetParameter",
+                "ssm:GetParameters"
+            ],
+            "Resource": "*"
+        }
+    ]
 }
 ```
 
