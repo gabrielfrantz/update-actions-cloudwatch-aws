@@ -1,9 +1,0 @@
-{
-  "alarms": [
-    "HighCPUUtilization",
-    "LowDiskSpace",
-    "DatabaseConnectionErrors",
-    "ApplicationErrors"
-  ]
-}
-
