@@ -27,6 +27,3 @@ ENV/
 .DS_Store
 Thumbs.db
 
-# Arquivos de alarmes (manter apenas o exemplo)
-alarms.json
-
