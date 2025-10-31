@@ -11,7 +11,7 @@ import sys
 import argparse
 import boto3
 from botocore.exceptions import ClientError, NoCredentialsError
-from typing import List, Dict, Set
+from typing import List, Dict, Set, Tuple
 
 
 class CloudWatchAlarmUpdater:
@@ -82,7 +82,7 @@ class CloudWatchAlarmUpdater:
             print(f"✗ Erro ao carregar lista de alarmes: {e}")
             sys.exit(1)
     
-    def get_alarm_details(self, alarm_names: List[str]) -> Dict[str, Dict]:
+    def get_alarm_details(self, alarm_names: List[str]) -> Tuple[Dict[str, Dict], List[str]]:
         """
         Busca detalhes dos alarmes no CloudWatch.
         
@@ -90,7 +90,9 @@ class CloudWatchAlarmUpdater:
             alarm_names: Lista de nomes dos alarmes
             
         Returns:
-            Dicionário com nome do alarme como chave e detalhes como valor
+            Tupla contendo:
+            - Dicionário com nome do alarme como chave e detalhes como valor
+            - Lista de alarmes não encontrados
         """
         alarms_details = {}
         not_found = []
@@ -123,15 +125,10 @@ class CloudWatchAlarmUpdater:
                 print(f"✗ Erro ao buscar alarmes: {e}")
                 sys.exit(1)
         
-        if not_found:
-            print(f"⚠ Aviso: {len(not_found)} alarme(s) não encontrado(s): {', '.join(not_found[:5])}")
-            if len(not_found) > 5:
-                print(f"   ... e mais {len(not_found) - 5} alarme(s)")
-        
-        return alarms_details
+        return alarms_details, not_found
     
     def update_alarm_sns_topic(self, alarm_name: str, topic_arn: str, 
-                               states: List[str], action: str) -> bool:
+                               states: List[str], action: str) -> Dict:
         """
         Adiciona ou remove um tópico SNS de um alarme específico.
         
@@ -142,15 +139,24 @@ class CloudWatchAlarmUpdater:
             action: 'add' para adicionar, 'remove' para remover
             
         Returns:
-            True se a atualização foi bem-sucedida, False caso contrário
+            Dicionário com informações sobre a atualização:
+            - 'success': bool indicando sucesso
+            - 'changes': lista de mudanças realizadas por estado
+            - 'error': mensagem de erro (se houver)
         """
+        result = {
+            'success': False,
+            'changes': [],
+            'error': None
+        }
+        
         try:
             # Buscar alarme atual
             response = self.cloudwatch.describe_alarms(AlarmNames=[alarm_name])
             
             if not response['MetricAlarms']:
-                print(f"  ✗ Alarme '{alarm_name}' não encontrado")
-                return False
+                result['error'] = f"Alarme '{alarm_name}' não encontrado"
+                return result
             
             alarm = response['MetricAlarms'][0]
             
@@ -159,37 +165,56 @@ class CloudWatchAlarmUpdater:
             alarm_actions = set(alarm.get('AlarmActions', []))
             insufficient_data_actions = set(alarm.get('InsufficientDataActions', []))
             
-            # Aplicar ação para cada estado
+            # Aplicar ação para cada estado e registrar mudanças
             updated = False
             if 'OK' in states:
                 if action == 'add' and topic_arn not in ok_actions:
                     ok_actions.add(topic_arn)
                     updated = True
+                    result['changes'].append('OK: Adicionado tópico SNS')
                 elif action == 'remove' and topic_arn in ok_actions:
                     ok_actions.remove(topic_arn)
                     updated = True
+                    result['changes'].append('OK: Removido tópico SNS')
+                elif action == 'add' and topic_arn in ok_actions:
+                    result['changes'].append('OK: Tópico já presente (nenhuma ação)')
+                elif action == 'remove' and topic_arn not in ok_actions:
+                    result['changes'].append('OK: Tópico não presente (nenhuma ação)')
             
             if 'IN_ALARM' in states:
                 if action == 'add' and topic_arn not in alarm_actions:
                     alarm_actions.add(topic_arn)
                     updated = True
+                    result['changes'].append('IN_ALARM: Adicionado tópico SNS')
                 elif action == 'remove' and topic_arn in alarm_actions:
                     alarm_actions.remove(topic_arn)
                     updated = True
+                    result['changes'].append('IN_ALARM: Removido tópico SNS')
+                elif action == 'add' and topic_arn in alarm_actions:
+                    result['changes'].append('IN_ALARM: Tópico já presente (nenhuma ação)')
+                elif action == 'remove' and topic_arn not in alarm_actions:
+                    result['changes'].append('IN_ALARM: Tópico não presente (nenhuma ação)')
             
             if 'INSUFFICIENT_DATA' in states:
                 if action == 'add' and topic_arn not in insufficient_data_actions:
                     insufficient_data_actions.add(topic_arn)
                     updated = True
+                    result['changes'].append('INSUFFICIENT_DATA: Adicionado tópico SNS')
                 elif action == 'remove' and topic_arn in insufficient_data_actions:
                     insufficient_data_actions.remove(topic_arn)
                     updated = True
+                    result['changes'].append('INSUFFICIENT_DATA: Removido tópico SNS')
+                elif action == 'add' and topic_arn in insufficient_data_actions:
+                    result['changes'].append('INSUFFICIENT_DATA: Tópico já presente (nenhuma ação)')
+                elif action == 'remove' and topic_arn not in insufficient_data_actions:
+                    result['changes'].append('INSUFFICIENT_DATA: Tópico não presente (nenhuma ação)')
             
-            if not updated:
-                return False
+            if not updated and not result['changes']:
+                result['error'] = 'Nenhuma alteração necessária'
+                return result
             
-            # Atualizar alarme (se não for dry-run)
-            if not self.dry_run:
+            # Atualizar alarme (se não for dry-run e houver mudanças)
+            if not self.dry_run and updated:
                 # Construir parâmetros do alarme preservando todos os campos originais
                 put_params = {
                     'AlarmName': alarm_name,
@@ -232,14 +257,15 @@ class CloudWatchAlarmUpdater:
                 
                 self.cloudwatch.put_metric_alarm(**put_params)
             
-            return True
+            result['success'] = True
+            return result
             
         except ClientError as e:
-            print(f"  ✗ Erro ao atualizar alarme '{alarm_name}': {e}")
-            return False
+            result['error'] = f"Erro ao atualizar alarme: {e}"
+            return result
         except Exception as e:
-            print(f"  ✗ Erro inesperado ao atualizar '{alarm_name}': {e}")
-            return False
+            result['error'] = f"Erro inesperado: {e}"
+            return result
     
     def process_alarms(self, alarm_list_path: str, topic_arn: str, 
                       states: List[str], action: str) -> Dict:
@@ -271,18 +297,31 @@ class CloudWatchAlarmUpdater:
         
         # Buscar detalhes dos alarmes
         print(f"\nBuscando detalhes de {len(alarm_names)} alarme(s)...")
-        alarms_details = self.get_alarm_details(alarm_names)
+        alarms_details, not_found_alarms = self.get_alarm_details(alarm_names)
+        
+        # Mostrar alarmes não encontrados
+        if not_found_alarms:
+            print(f"\n⚠ Aviso: {len(not_found_alarms)} alarme(s) não encontrado(s):")
+            for alarm in sorted(not_found_alarms):
+                print(f"  ✗ {alarm}")
+            print()
         
         if not alarms_details:
-            print("✗ Nenhum alarme válido encontrado")
-            sys.exit(1)
+            if not_found_alarms:
+                print("✗ Nenhum alarme válido foi encontrado na lista fornecida")
+                sys.exit(1)
+            else:
+                print("✗ Nenhum alarme válido encontrado")
+                sys.exit(1)
         
         # Modo dry-run: apenas mostrar o que seria feito
         if self.dry_run:
             print(f"\n{'='*60}")
             print("MODO DRY-RUN - Nenhuma alteração será realizada")
             print(f"{'='*60}")
-            print(f"\nTotal de alarmes a serem atualizados: {len(alarms_details)}")
+            print(f"\nTotal de alarmes encontrados: {len(alarms_details)}")
+            if not_found_alarms:
+                print(f"Alarmes não encontrados: {len(not_found_alarms)}")
             print(f"Ação: {action.upper()}")
             print(f"Tópico SNS: {topic_arn}")
             print(f"Estados: {', '.join(states)}")
@@ -314,41 +353,81 @@ class CloudWatchAlarmUpdater:
             
             print(f"\n{'-'*60}")
             print("Fim do modo dry-run")
-            return {'total': len(alarms_details), 'processed': 0, 'success': 0, 'failed': 0}
+            return {
+                'total': len(alarm_names),
+                'found': len(alarms_details),
+                'not_found': len(not_found_alarms),
+                'processed': 0,
+                'success': 0,
+                'failed': 0
+            }
         
         # Modo execução real
         print(f"\n{'='*60}")
         print(f"Processando {len(alarms_details)} alarme(s)...")
+        print(f"{'='*60}")
+        print(f"Ação: {action.upper()}")
+        print(f"Tópico SNS: {topic_arn}")
+        print(f"Estados: {', '.join(states)}")
         print(f"{'='*60}\n")
         
         stats = {
-            'total': len(alarms_details),
+            'total': len(alarm_names),
+            'found': len(alarms_details),
+            'not_found': len(not_found_alarms),
             'processed': 0,
             'success': 0,
-            'failed': 0
+            'failed': 0,
+            'no_changes': 0
         }
         
+        # Processar alarmes encontrados
         for alarm_name in sorted(alarms_details.keys()):
-            print(f"Processando: {alarm_name}...", end=' ')
+            print(f"Alarme: {alarm_name}")
             
-            success = self.update_alarm_sns_topic(alarm_name, topic_arn, states, action)
+            result = self.update_alarm_sns_topic(alarm_name, topic_arn, states, action)
             
-            if success:
-                print("✓")
-                stats['success'] += 1
+            if result['error']:
+                print(f"  ✗ {result['error']}")
+                stats['failed'] += 1
+            elif result['success']:
+                # Mostrar detalhes das mudanças
+                if result['changes']:
+                    for change in result['changes']:
+                        if 'nenhuma ação' in change.lower():
+                            print(f"  ⚪ {change}")
+                        elif 'Adicionado' in change:
+                            print(f"  ✓ {change}")
+                        elif 'Removido' in change:
+                            print(f"  ✓ {change}")
+                    # Verificar se houve alteração real (não apenas "nenhuma ação")
+                    has_real_change = any('nenhuma ação' not in c.lower() for c in result['changes'])
+                    if has_real_change:
+                        stats['success'] += 1
+                    else:
+                        stats['no_changes'] += 1
+                else:
+                    print(f"  ⚪ Nenhuma alteração necessária")
+                    stats['no_changes'] += 1
             else:
-                print("✗")
+                print(f"  ✗ Falha ao processar")
                 stats['failed'] += 1
             
             stats['processed'] += 1
+            print()  # Linha em branco entre alarmes
         
         # Resumo
-        print(f"\n{'='*60}")
+        print(f"{'='*60}")
         print("Resumo:")
-        print(f"  Total: {stats['total']}")
+        print(f"  Total na lista: {stats['total']}")
+        print(f"  Alarmes encontrados: {stats['found']}")
+        if stats['not_found'] > 0:
+            print(f"  ✗ Alarmes não encontrados: {stats['not_found']}")
         print(f"  Processados: {stats['processed']}")
-        print(f"  Sucesso: {stats['success']}")
-        print(f"  Falhas: {stats['failed']}")
+        print(f"  ✓ Atualizados com sucesso: {stats['success']}")
+        print(f"  ⚪ Sem alterações necessárias: {stats['no_changes']}")
+        if stats['failed'] > 0:
+            print(f"  ✗ Falhas no processamento: {stats['failed']}")
         print(f"{'='*60}")
         
         return stats
