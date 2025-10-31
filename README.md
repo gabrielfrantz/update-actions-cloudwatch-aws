@@ -252,19 +252,3 @@ python update_cloudwatch_alarms.py \
 ### Erro: "Formato JSON inválido"
 - Verifique a sintaxe do arquivo JSON
 - Use o arquivo `alarms.example.json` como referência
-
-## 📄 Licença
-
-Este projeto está disponível para uso interno.
-
-## 🤝 Contribuindo
-
-1. Faça fork do repositório
-2. Crie uma branch para sua feature (`git checkout -b feature/nova-funcionalidade`)
-3. Commit suas alterações (`git commit -am 'Adiciona nova funcionalidade'`)
-4. Push para a branch (`git push origin feature/nova-funcionalidade`)
-5. Abra um Pull Request
-
-## 📞 Suporte
-
-Para dúvidas ou problemas, abra uma issue no repositório.
