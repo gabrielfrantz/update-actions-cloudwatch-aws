@@ -1,0 +1,32 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+env/
+venv/
+ENV/
+.venv
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# AWS
+.aws/
+*.pem
+
+# Logs
+*.log
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Arquivos de alarmes (manter apenas o exemplo)
+alarms.json
+
