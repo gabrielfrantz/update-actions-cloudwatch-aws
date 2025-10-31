@@ -123,5 +123,4 @@ jobs:
             --list-alarms "${{ github.event.inputs.alarm_list_file }}" \
             --action "${{ github.event.inputs.action }}" \
             --states "${{ steps.prepare_states.outputs.states }}" \
-            --topic-arn "${{ github.event.inputs.topic_arn }}"
-
+            --topic-arn "${{ github.event.inputs.topic_arn }}" 
