@@ -12,18 +12,18 @@ on:
           - production
       
       alarm_list_file:
-        description: 'Caminho para arquivo JSON com lista de alarmes'
+        description: 'Arquivo JSON com a lista de alarmes'
         required: true
         type: string
         default: 'alarms.json'
       
       topic_arn:
-        description: 'ARN do tópico SNS'
+        description: 'ARN do tópico SNS a remover das actions'
         required: true
         type: string
       
       action:
-        description: 'Ação a realizar'
+        description: 'Ação a ser realizada'
         required: true
         type: choice
         options:
@@ -56,8 +56,12 @@ on:
 
 jobs:
   update-alarms:
-    runs-on: ubuntu-latest
+    runs-on: ubuntu-24.04
     environment: ${{ github.event.inputs.environment }}
+
+    permissions:
+      id-token: write
+      contents: read
     
     steps:
       - name: Checkout repository
@@ -100,7 +104,7 @@ jobs:
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
-          aws-region: us-east-1
+          aws-region: ${{ secrets.AWS_REGION }}
       
       - name: Run dry-run (if enabled)
         if: github.event.inputs.dry_run == 'true'
